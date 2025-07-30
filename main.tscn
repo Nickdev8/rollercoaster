@@ -1,0 +1,13 @@
+[gd_scene load_steps=4 format=3 uid="uid://c6jalv4iknyuj"]
+
+[ext_resource type="Script" uid="uid://8tkuto57tja5" path="res://main.gd" id="1_ig7tw"]
+[ext_resource type="Texture2D" uid="uid://pmqvdcmjupqe" path="res://assets/track.png" id="2_0xm2m"]
+[ext_resource type="Texture2D" uid="uid://d4k3470cqcrqr" path="res://icon.svg" id="3_h2yge"]
+
+[node name="Node2D" type="Node2D"]
+script = ExtResource("1_ig7tw")
+track_texture = ExtResource("2_0xm2m")
+
+[node name="Card" type="Sprite2D" parent="."]
+position = Vector2(-2, -12)
+texture = ExtResource("3_h2yge")
