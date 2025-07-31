@@ -13,6 +13,7 @@ config_version=5
 config/name="rollercoaster"
 run/main_scene="uid://c6jalv4iknyuj"
 config/features=PackedStringArray("4.4", "GL Compatibility")
+boot_splash/bg_color=Color(1, 1, 1, 1)
 config/icon="res://icon.svg"
 
 [editor_plugins]
@@ -23,3 +24,4 @@ enabled=PackedStringArray("res://addons/godot_super-wakatime/plugin.cfg")
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(1, 1, 1, 1)

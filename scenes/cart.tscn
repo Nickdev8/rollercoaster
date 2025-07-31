@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3 uid="uid://da3ptj2vq1e5y"]
+
+[ext_resource type="Texture2D" uid="uid://b3275wpvge8qa" path="res://assets/cart.png" id="1_0tgi4"]
+
+[node name="cart" type="Node2D"]
+
+[node name="Carr" type="Sprite2D" parent="."]
+position = Vector2(0, -10)
+scale = Vector2(0.390625, 0.390625)
+texture = ExtResource("1_0tgi4")
