@@ -1,12 +1,11 @@
-[gd_scene load_steps=4 format=3 uid="uid://c6jalv4iknyuj"]
+[gd_scene load_steps=3 format=3 uid="uid://c6jalv4iknyuj"]
 
 [ext_resource type="Script" uid="uid://8tkuto57tja5" path="res://scripts/main.gd" id="1_0wfyh"]
-[ext_resource type="Texture2D" uid="uid://pmqvdcmjupqe" path="res://assets/track.png" id="2_sugp2"]
 [ext_resource type="Script" uid="uid://b0ilhjbpix1mu" path="res://scenes/closewindow.gd" id="3_sugp2"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_0wfyh")
-track_texture = ExtResource("2_sugp2")
+input_threshold = 100.0
 cart_count = 10
 cart_spacing = 45.0
 drag_coeff = 0.01

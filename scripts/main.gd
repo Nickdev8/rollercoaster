@@ -1,18 +1,22 @@
 extends Node2D
 
-# adaptive smoothing and drawing
-@export var resolution:      float   = 50.0  # target pixels per segment and input threshold
-@export var track_texture:  Texture2D
-@export var rail_width:     float   = 30.0
-@export var uv_region:      Rect2   = Rect2(0,0,1,1)
+# adaptive smoothing
+@export var resolution:      float   = 50.0  # target pixels per segment for smoothing
+
+# input sampling threshold
+@export var input_threshold:  float   = 50.0  # min distance between points when drawing
+
+# rail drawing
+@export var rail_width:      float   = 2.0   # line thickness for drawing rails
+@export var rail_offset:     float   = 5.0   # pixel offset between the two rails
 
 # cart settings
-@export var cart_count:     int     = 3
-@export var cart_spacing:   float   = 150.0
+@export var cart_count:      int     = 3
+@export var cart_spacing:    float   = 150.0
 
 # physics constants
-const G: float = 800.0                 # gravitational acceleration (px/s^2)
-@export var drag_coeff:  float = 0.001  # low linear drag for high momentum
+const G: float = 800.0                   # gravitational acceleration (px/s^2)
+@export var drag_coeff:  float = 0.001   # low linear drag for high momentum
 @export var initial_speed: float = 0.0
 @export var max_speed:    float = 5000.0 # clamp for runaway tracks
 
@@ -20,7 +24,7 @@ const G: float = 800.0                 # gravitational acceleration (px/s^2)
 var points:       Array[Vector2] = []
 var is_drawing:   bool          = false
 var last_point:   Vector2       = Vector2.ZERO
-var carts:        Array = []  # entries: {"node": Node2D, "offset": float, "speed": float}
+var carts:        Array         = []      # entries: {"node": Node2D, "offset": float, "speed": float}
 
 # camera control
 var cam: Camera2D
@@ -36,14 +40,6 @@ func _ready():
 		cam = Camera2D.new()
 		add_child(cam)
 	cam.make_current()
-	# build cropped AtlasTexture
-	if track_texture:
-		var atlas = AtlasTexture.new()
-		atlas.atlas = track_texture
-		var ts = track_texture.get_size()
-		atlas.region = Rect2(uv_region.position * ts, uv_region.size * ts)
-		atlas.filter_clip = true
-		track_texture = atlas
 
 	# instantiate carts
 	for i in range(cart_count):
@@ -56,7 +52,6 @@ func _ready():
 		})
 
 func _input(event):
-	# adaptive min_distance based on resolution
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			is_drawing = true
@@ -67,7 +62,8 @@ func _input(event):
 			is_drawing = false
 	elif event is InputEventMouseMotion and is_drawing:
 		var mp = get_global_mouse_position()
-		if mp.distance_to(last_point) >= resolution:
+		# only register if moved at least input_threshold
+		if mp.distance_to(last_point) >= input_threshold:
 			last_point = mp
 			points.append(last_point)
 			queue_redraw()
@@ -99,32 +95,18 @@ func _input(event):
 
 func _draw():
 	var track_pts = get_track_points()
-	if track_pts.size() < 2 or not track_texture:
+	if track_pts.size() < 2:
 		return
 
-	var ts      = track_texture.get_size()
-	var region  = uv_region.size * ts
-	var pw      = region.x
-	var ph      = region.y
-
+	# draw two parallel lines offset by rail_offset
 	for i in range(track_pts.size() - 1):
 		var a = track_pts[i]
-		var b = track_pts[i+1]
-		var seg_len = a.distance_to(b)
-		if seg_len <= 0:
-			continue
-		var ang    = (b - a).angle()
-		var slices = int(ceil(seg_len / pw))
-		draw_set_transform(a, ang, Vector2.ONE)
-		for k in range(slices):
-			var x_off = k * pw
-			var w     = min(pw, seg_len - x_off)
-			if w <= 0:
-				break
-			var src = Rect2(uv_region.position * ts, Vector2(w, ph))
-			var dst = Rect2(Vector2(x_off,0), Vector2(w, rail_width))
-			draw_texture_rect_region(track_texture, dst, src, Color(1,1,1), false, true)
-		draw_set_transform_matrix(Transform2D.IDENTITY)
+		var b = track_pts[i + 1]
+		var dir = (b - a).normalized()
+		var perp = Vector2(-dir.y, dir.x)
+
+		draw_line(a, b, Color.BLACK, rail_width)
+		draw_line(a + perp * rail_offset, b + perp * rail_offset, Color.BLACK, rail_width)
 
 func _process(delta):
 	var track_pts = get_track_points()
@@ -153,11 +135,9 @@ func get_track_points() -> PackedVector2Array:
 	if pts.size() < 2:
 		return PackedVector2Array()
 
-	# compute total length for adaptive segments
 	var length = total_length(pts)
 	var segs   = max(1, int(length / resolution))
 
-	# Catmull-Rom smoothing with adaptive segment count
 	var smooth = PackedVector2Array()
 	for i in range(pts.size() - 1):
 		var p0 = pts[i-1] if i>0 else pts[i]
@@ -165,14 +145,14 @@ func get_track_points() -> PackedVector2Array:
 		var p2 = pts[i+1]
 		var p3 = pts[i+2] if i+2<pts.size() else pts[i+1]
 		for j in range(segs + 1):
-			var t  = j / float(segs)
+			var t = j / float(segs)
 			var t2 = t*t; var t3 = t2*t
-			smooth.append(p0 * (-0.5*t3 + t2 - 0.5*t)
-						+ p1 * ( 1.5*t3 - 2.5*t2 + 1.0)
-						+ p2 * (-1.5*t3 + 2.0*t2 + 0.5*t)
-						+ p3 * ( 0.5*t3 - 0.5*t2))
-
-	# preserve spacing
+			smooth.append(
+				p0 * (-0.5*t3 + t2 - 0.5*t) +
+				p1 * (1.5*t3 - 2.5*t2 + 1.0) +
+				p2 * (-1.5*t3 + 2.0*t2 + 0.5*t) +
+				p3 * (0.5*t3 - 0.5*t2)
+			)
 	var clamped = PackedVector2Array()
 	clamped.append(smooth[0])
 	for i in range(1, smooth.size()):
