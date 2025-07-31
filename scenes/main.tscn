@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://c6jalv4iknyuj"]
+[gd_scene load_steps=4 format=3 uid="uid://c6jalv4iknyuj"]
 
 [ext_resource type="Script" uid="uid://8tkuto57tja5" path="res://scripts/main.gd" id="1_0wfyh"]
 [ext_resource type="Texture2D" uid="uid://pmqvdcmjupqe" path="res://assets/track.png" id="2_sugp2"]
+[ext_resource type="Script" uid="uid://b0ilhjbpix1mu" path="res://scenes/closewindow.gd" id="3_sugp2"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_0wfyh")
@@ -11,3 +12,24 @@ cart_spacing = 45.0
 drag_coeff = 0.01
 
 [node name="Camera2D" type="Camera2D" parent="."]
+
+[node name="Window" type="Window" parent="."]
+title = "Controlls."
+initial_position = 1
+size = Vector2i(270, 215)
+script = ExtResource("3_sugp2")
+
+[node name="RichTextLabel" type="RichTextLabel" parent="Window"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/default_color = Color(0, 0, 0, 1)
+text = "Press C to Clear the scene
+Press R to reset the carts
+Left mb draw
+right mb pan
+scroll zoom"
+
+[connection signal="close_requested" from="Window" to="Window" method="_on_close_requested"]
