@@ -1,82 +1,60 @@
+
 extends Node2D
 
-# --- Adaptive smoothing & sampling ---
-@export var resolution: float = 50.0          # points per segment for interpolation
-@export var smoothing_factor: float = 0.1     # for exponential smoothing of G readings
+# adaptive smoothing
+@export var resolution: float = 50.0
 
-# --- Input drawing thresholds ---
+# input sampling threshold
 @export var input_threshold: float = 50.0
 
-# --- Rail drawing parameters ---
+# rail drawing
 @export var rail_width: float = 2.0
 @export var rail_offset: float = 5.0
 
-# --- Cart & detachment settings ---
+# cart settings
 @export var cart_count: int = 3
 @export var cart_spacing: float = 150.0
-@export var detach_threshold_g: float = 3.0   # detach at 3 G
+@export var detach_threshold: float = 2.0  # G-force at which to detach
 
-# --- Cartoon ejection settings ---
-@export var eject_force_multiplier: float = 3.0
-@export var eject_spin_range: Vector2 = Vector2(5.0, 15.0)
-@export var cartoon_tween_time: float = 0.5   # duration of squash/stretch tween
+# physics constants
+const G: float = 800.0  # px/s²
+@export var drag_coeff: float = 0.001
+@export var initial_speed: float = 0.0
+@export var max_speed: float = 5000.0
 
-# --- Physics constants & conversions ---
-const REAL_G: float = 9.81                   # m/s²
-@export var px_to_m: float = 0.01            # 1px = 1cm = 0.01 m
-@export var drag_linear: float = 0.1         # linear drag (kg/s)
-@export var drag_quadratic: float = 0.01     # quadratic drag (kg/m)
-@export var mass: float = 1.0                # cart mass (kg)
+# internal state
+var points: Array[Vector2] = []
+var is_drawing: bool = false
+var last_point: Vector2 = Vector2.ZERO
+var carts: Array = []  # each: { node, offset, speed, max_g, detached }
+var highest_g_overall: float = 0.0
 
-@export var initial_speed: float = 0.0       # in px/s
-@export var max_speed: float = 5000.0        # in px/s
-
-# --- Internal state ---
-var points := PackedVector2Array()
-var is_drawing := false
-var last_point := Vector2.ZERO
-
-var carts: Array = []                        # each is a Dictionary
-var highest_g_overall := 0.0
-
-# --- Camera ---
+# camera
 var cam: Camera2D
-var is_panning := false
+var is_panning: bool = false
 
 @onready var cart_scene: PackedScene = preload("res://scenes/cart.tscn")
 
 func _ready():
-	# Setup camera
-	if has_node("Camera2D"):
-		cam = $Camera2D
-	else:
-		cam = Camera2D.new()
+	# camera setup
+	cam = $Camera2D if has_node("Camera2D") else Camera2D.new()
+	if !has_node("Camera2D"):
 		add_child(cam)
 	cam.make_current()
 
-	_reset_carts()
-
-func _reset_carts():
-	# Remove old carts
-	for c in carts:
-		if is_instance_valid(c.node):
-			c.node.queue_free()
-	carts.clear()
-	# Spawn new carts
-	for i in cart_count:
+	# instantiate carts
+	for i in range(cart_count):
 		var cart_node = cart_scene.instantiate() as Node2D
 		add_child(cart_node)
 		carts.append({
 			"node": cart_node,
-			"offset": float(i) * cart_spacing,
+			"offset": i * cart_spacing,
 			"speed": initial_speed,
-			"smoothed_g": 0.0,
-			"max_g": 0.0,
+			"max_g": 9,
 			"detached": false
 		})
 
 func _input(event):
-	# Track drawing
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			is_drawing = true
@@ -85,7 +63,6 @@ func _input(event):
 			queue_redraw()
 		else:
 			is_drawing = false
-
 	elif event is InputEventMouseMotion and is_drawing:
 		var mp = get_global_mouse_position()
 		if mp.distance_to(last_point) >= input_threshold:
@@ -93,198 +70,156 @@ func _input(event):
 			points.append(mp)
 			queue_redraw()
 
-	# Clear or reset
 	if event is InputEventKey and event.pressed:
-		match event.key:
+		match event.keycode:
 			KEY_C:
-				points.clear()
-				queue_redraw()
+				points.clear(); queue_redraw()
 			KEY_R:
-				_reset_carts()
+				for j in range(carts.size()):
+					var c = carts[j]
+					c.offset = j * cart_spacing
+					c.speed = initial_speed
+					c.max_g = 9
+					c.detached = false
+					# reset nodes
+					if !is_instance_valid(c.node):
+						var new_node = cart_scene.instantiate() as Node2D
+						add_child(new_node)
+						c.node = new_node
 
-	# Camera control
-	if event is InputEventMouseButton:
-		match event.button_index:
-			MOUSE_BUTTON_RIGHT:
-				is_panning = event.pressed
-			MOUSE_BUTTON_WHEEL_UP:
-				cam.zoom *= 1.1
-			MOUSE_BUTTON_WHEEL_DOWN:
-				cam.zoom *= 0.9
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		is_panning = event.pressed
 	elif event is InputEventMouseMotion and is_panning:
 		cam.position -= event.relative / cam.zoom
 
+	if event is InputEventMouseButton and event.pressed:
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP: cam.zoom *= 1.1
+			MOUSE_BUTTON_WHEEL_DOWN: cam.zoom *= 0.9
+
 func _draw():
-	var pts = _get_track_points()
+	var pts = get_track_points()
 	if pts.size() < 2:
 		return
 
-	var left_pts = []
-	var right_pts = []
-	for i in pts.size():
+	var left_arr = PackedVector2Array()
+	var right_arr = PackedVector2Array()
+	for i in range(pts.size()):
 		var p = pts[i]
-		var dir = ((pts[i + 1] - p).normalized() if i < pts.size() - 1 else (p - pts[i - 1]).normalized())
+		var dir = (pts[i+1] - p).normalized() if i < pts.size()-1 else (p - pts[i-1]).normalized()
 		var perp = Vector2(-dir.y, dir.x)
-		left_pts.append(p + perp * rail_offset)
-		right_pts.append(p - perp * rail_offset)
-	draw_polyline(left_pts, Color.BLACK, rail_width)
-	draw_polyline(right_pts, Color.BLACK, rail_width)
+		left_arr.append(p + perp * rail_offset)
+		right_arr.append(p - perp * rail_offset)
 
-func _process(delta: float) -> void:
-	var pts = _get_track_points()
+	draw_polyline(left_arr, Color.BLACK, rail_width)
+	draw_polyline(right_arr, Color.BLACK, rail_width)
+
+func _process(delta):
+	var pts = get_track_points()
 	if pts.size() < 2:
 		return
-	var total_len = _total_length(pts)
+	var length = total_length(pts)
 
-	for cart in carts:
+	for i in range(carts.size()-1, -1, -1):
+		var cart = carts[i]
 		if cart.detached:
 			continue
 
-		# Sample track at cart.offset
-		var s = _sample_track(pts, cart.offset)
-		_update_cart_node(cart, s)
+		var s = sample_track(pts, cart.offset)
+		var pos = s.pos
+		var angle = s.angle
+		var segl = s.seg_len
 
-		# Physics in meters
-		var v_m = cart.speed * px_to_m
-		var tangent = Vector2(cos(s.angle), sin(s.angle))
-		var normal = Vector2(-tangent.y, tangent.x)
+		# update node transform
+		var node = cart.node as Node2D
+		node.global_position = pos
+		node.rotation = angle
 
-		# Curvature → R
-		var curvature = _compute_curvature(pts, s.idx, s.seg_len)
-		var radius = 1.0 / curvature if curvature > 0.0 else INF
+		# tangential accel
+		var a_tangent = G * sin(angle) - drag_coeff * cart.speed
 
-		# Tangential acceleration
-		var F_gravity_t = mass * REAL_G * cos(PI/2 - s.angle)
-		var F_drag = drag_linear * v_m + drag_quadratic * v_m * abs(v_m)
-		var a_tangent = (F_gravity_t - F_drag) / mass
+		# centripetal accel
+		var curvature = 0.0
+		if segl > 0.001 and s.idx < pts.size()-1:
+			var next_ang = (pts[s.idx+2] - pts[s.idx+1]).angle() if s.idx < pts.size()-2 else angle
+			var dθ = wrapf(next_ang - angle, -PI, PI)
+			curvature = abs(dθ) / max(segl, 0.001)
+		var a_centrip = clamp(cart.speed * cart.speed * curvature, -G*10, G*10)
 
-		# Centripetal accel
-		var a_normal = v_m * v_m / radius if radius < INF else 0.0
+		# normal accel
+		var a_normal = G * cos(angle) + a_centrip
 
-		var a_vec = tangent * a_tangent + normal * a_normal
-		var g_total = a_vec.length() / REAL_G
+		# move along track
+		cart.speed = clamp(cart.speed + a_tangent * delta, -max_speed, max_speed)
+		cart.offset = fmod(cart.offset + cart.speed * delta + length, length)
 
-		# Smooth & record
-		cart.smoothed_g = lerp(cart.smoothed_g, g_total, clamp(smoothing_factor, 0, 1))
-		cart.max_g = max(cart.max_g, cart.smoothed_g)
-		highest_g_overall = max(highest_g_overall, cart.smoothed_g)
+		# compute G
+		var g_total = sqrt(a_tangent*a_tangent + a_normal*a_normal) / G
+		node.set("current_g", g_total)
 
-		# Move along track
-		cart.speed = clamp(cart.speed + a_tangent * delta / px_to_m, -max_speed, max_speed)
-		cart.offset = (cart.offset + cart.speed * delta + total_len) % total_len
+		# update peaks
+		cart.max_g = max(cart.max_g, g_total)
+		highest_g_overall = max(highest_g_overall, g_total)
 
-		# Detach if too many Gs
-		if abs(cart.speed) > 0.1 and cart.smoothed_g > detach_threshold_g:
+		# only detach if speed is non-zero
+		if abs(cart.speed) > 0.1 and g_total > detach_threshold:
 			cart.detached = true
-			_detach_cart(cart, s)
+			_detach_cart(cart, angle, g_total)
 
-func _detach_cart(cart: Dictionary, s: Dictionary) -> void:
-	var old = cart.node
+func _detach_cart(cart: Dictionary, angle: float, g_total: float) -> void:
+	var old = cart.node as Node2D
 	var body = RigidBody2D.new()
-	body.mode = RigidBody2D.FREEZE_MODE_KINEMATIC
 	body.global_position = old.global_position
 	body.global_rotation = old.global_rotation
-
-	# Cartoon impulse
-	var tangent = Vector2(cos(s.angle), sin(s.angle))
-	var outward = Vector2(-sin(s.angle), cos(s.angle))
-	var force = (tangent + outward).normalized() * cart.speed * eject_force_multiplier
-	body.apply_central_impulse(force * px_to_m * mass)
-
-	# Random spin
-	body.angular_velocity = randf_range(eject_spin_range.x, eject_spin_range.y) * (1 if randf() < 0.5 else -1)
-
-	# Move visuals under physics body
+	var tangent = Vector2(cos(angle), sin(angle))
+	var outward = Vector2(-sin(angle), cos(angle)) * max(g_total - 1, 0)
+	var dir = (tangent + outward).normalized()
+	body.linear_velocity = dir * cart.speed
+	# reparent visuals
 	for child in old.get_children():
 		old.remove_child(child)
 		body.add_child(child)
 	get_parent().add_child(body)
 	old.queue_free()
 
-	# Cartoon squash & stretch
-	var tween = body.create_tween()
-	tween.tween_property(body, "scale", Vector2(1.5, 0.5), cartoon_tween_time * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tween.tween_property(body, "scale", Vector2(1, 1), cartoon_tween_time).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-
-	# Particle burst
-	var particles = CPUParticles2D.new()
-	particles.lifetime = cartoon_tween_time
-	particles.one_shot = true
-	particles.amount = 20
-	particles.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE
-	particles.speed_scale = 5
-	particles.process_material = ParticleProcessMaterial.new()
-	particles.global_position = body.global_position
-	body.add_child(particles)
-	particles.emitting = true
-
-# --- Track helpers ---
-
-func _compute_curvature(pts: PackedVector2Array, idx: int, seg_len: float) -> float:
-	if idx < 1 or idx > pts.size() - 2:
-		return 0.0
-	var p1 = pts[idx - 1]
-	var p2 = pts[idx]
-	var p3 = pts[idx + 1]
-	var a1 = (p2 - p1).angle()
-	var a2 = (p3 - p2).angle()
-	return abs(wrapf(a2 - a1, -PI, PI)) / max(seg_len * px_to_m, 0.001)
-
-func _update_cart_node(cart: Dictionary, s: Dictionary) -> void:
-	cart.node.global_position = s.pos
-	cart.node.rotation = s.angle
-	cart.node.set("current_g", cart.smoothed_g)
-
-func _get_track_points() -> PackedVector2Array:
-	if points.size() < 2:
+func get_track_points() -> PackedVector2Array:
+	var pts0 = PackedVector2Array(points)
+	if pts0.size() < 2:
 		return PackedVector2Array()
-	var length = _total_length(points)
+	var length = total_length(pts0)
 	var segs = max(1, int(length / resolution))
 	var smooth = PackedVector2Array()
-	for i in points.size() - 1:
-		var p0 = points[i - 1] if  i > 0 else points[i]
-		var p1 = points[i]
-		var p2 = points[i + 1]
-		var p3 = points[i + 2] if i + 2 < points.size() else points[i + 1]
-		for j in segs + 1:
-			var t = j / float(segs)
-			smooth.append(_catmull_rom(p0, p1, p2, p3, t))
-	return smooth
+	for i in range(pts0.size()-1):
+		var p0 = pts0[i-1] if i>0 else pts0[i]
+		var p1 = pts0[i]; var p2 = pts0[i+1]
+		var p3 = pts0[i+2] if i+2<pts0.size() else pts0[i+1]
+		for j in range(segs+1):
+			var t = j/float(segs); var t2=t*t; var t3=t2*t
+			smooth.append(
+				p0*(-0.5*t3 + t2 - 0.5*t) +
+				p1*(1.5*t3 - 2.5*t2 + 1) +
+				p2*(-1.5*t3 + 2*t2 + 0.5*t) +
+				p3*(0.5*t3 - 0.5*t2)
+			)
+	var clamped = PackedVector2Array([smooth[0]])
+	for i in range(1, smooth.size()):
+		var prev = clamped[i-1]; var curr = smooth[i]
+		var d = curr.distance_to(prev)
+		clamped.append(prev if d <= 0 else prev + (curr - prev).normalized() * d)
+	return clamped
 
-func _catmull_rom(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, t: float) -> Vector2:
-	var t2 = t * t
-	var t3 = t2 * t
-	return p0 * (-0.5 * t3 + t2 - 0.5 * t) \
-		 + p1 * ( 1.5 * t3 - 2.5 * t2 + 1.0) \
-		 + p2 * (-1.5 * t3 + 2.0 * t2 + 0.5 * t) \
-		 + p3 * ( 0.5 * t3 - 0.5 * t2)
-
-func _total_length(pts: PackedVector2Array) -> float:
+func total_length(pts: PackedVector2Array) -> float:
 	var sum = 0.0
-	for i in pts.size() - 1:
-		sum += pts[i].distance_to(pts[i + 1])
+	for i in range(pts.size()-1): sum += pts[i].distance_to(pts[i+1])
 	return sum
 
-func _sample_track(pts: PackedVector2Array, offset: float) -> Dictionary:
+func sample_track(pts: PackedVector2Array, offset: float) -> Dictionary:
 	var traveled = 0.0
-	var L = _total_length(pts)
-	var off = (offset % L)
-	for i in pts.size() - 1:
-		var a = pts[i]
-		var b = pts[i + 1]
+	for i in range(pts.size()-1):
+		var a = pts[i]; var b = pts[i+1]
 		var seg = a.distance_to(b)
-		if traveled + seg >= off:
-			var t = (off - traveled) / seg
-			return {
-				"pos": a.lerp(b, t),
-				"angle": (b - a).angle(),
-				"idx": i,
-				"seg_len": seg
-			}
+		if traveled + seg >= offset:
+			var t = (offset - traveled) / seg
+			return {"pos": a.lerp(b, t), "angle": (b - a).angle(), "idx": i, "seg_len": seg}
 		traveled += seg
-	return {
-		"pos": pts[pts.size() - 1],
-		"angle": 0.0,
-		"idx": pts.size() - 2,
-		"seg_len": 0.0
-	}
+	return {"pos": pts[pts.size()-1], "angle": 0.0, "idx": pts.size()-2, "seg_len": 0.0}

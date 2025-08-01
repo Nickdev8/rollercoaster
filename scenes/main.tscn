@@ -8,7 +8,7 @@ script = ExtResource("1_0wfyh")
 input_threshold = 100.0
 cart_count = 10
 cart_spacing = 45.0
-detach_threshold_g = 9.0
+detach_threshold = 11.0
 
 [node name="Camera2D" type="Camera2D" parent="."]
 
