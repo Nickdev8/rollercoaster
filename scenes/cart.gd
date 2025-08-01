@@ -1,5 +1,7 @@
 extends Node2D
 
+var current_g: float
+
 var images = [
 	"res://assets/human1.png",
 	"res://assets/human2.png",
@@ -7,7 +9,7 @@ var images = [
 	"res://assets/human4.png",
 	"res://assets/human5.png"
 ]
-
+@onready var g_label: RichTextLabel = $G_label
 @onready var human_1: Sprite2D = $Human1
 @onready var human_2: Sprite2D = $Human2
 
@@ -22,3 +24,6 @@ func _ready() -> void:
 	while tex2 == tex1:
 		tex2 = load(images.pick_random())
 	human_2.texture = tex2
+
+func _process(delta: float) -> void:
+	g_label.text = str(floorf(current_g*100)/100)

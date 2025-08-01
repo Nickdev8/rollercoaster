@@ -24,3 +24,17 @@ position = Vector2(-3, -26)
 scale = Vector2(0.36, 0.36)
 texture = ExtResource("3_e671f")
 offset = Vector2(-18, 17)
+
+[node name="G_label" type="RichTextLabel" parent="."]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -20.0
+offset_right = 20.0
+offset_bottom = 40.0
+grow_horizontal = 2
+theme_override_colors/default_color = Color(0, 0, 0, 1)
+text = "11.g"
+scroll_active = false
+horizontal_alignment = 1
+vertical_alignment = 1

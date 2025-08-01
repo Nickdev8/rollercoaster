@@ -8,7 +8,7 @@ script = ExtResource("1_0wfyh")
 input_threshold = 100.0
 cart_count = 10
 cart_spacing = 45.0
-drag_coeff = 0.01
+detach_threshold_g = 9.0
 
 [node name="Camera2D" type="Camera2D" parent="."]
 
@@ -16,6 +16,7 @@ drag_coeff = 0.01
 title = "Controlls."
 initial_position = 1
 size = Vector2i(270, 215)
+visible = false
 script = ExtResource("3_sugp2")
 
 [node name="RichTextLabel" type="RichTextLabel" parent="Window"]
@@ -30,5 +31,7 @@ Press R to reset the carts
 Left mb draw
 right mb pan
 scroll zoom"
+
+[node name="RigidBody2D" type="RigidBody2D" parent="."]
 
 [connection signal="close_requested" from="Window" to="Window" method="_on_close_requested"]
